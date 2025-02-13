@@ -6,6 +6,54 @@ const hitSound = new Audio('hit.mp3');
 const resetSound = new Audio('reset.mp3');
 const explosionSound = new Audio('bigexplosion.wav');
 
+// Add near the top with other audio elements
+const themeMusic = new Audio('theme.mp3');
+const textBlipSound = new Audio('textblip.mp3');
+
+// Set theme music properties
+themeMusic.volume = 0.3;
+themeMusic.loop = true;
+
+// Add these near the top with other constants
+const dialogueImages = {
+    img1: new Image(),
+    img2: new Image(),
+    img3: new Image(),
+    img5: new Image(),
+    img6: new Image(),
+    img7: new Image(),
+    img8: new Image()
+};
+
+// Load dialogue images
+dialogueImages.img1.src = '1.png';
+dialogueImages.img2.src = '2.png';
+dialogueImages.img3.src = '3.png';
+dialogueImages.img5.src = '5.png';
+dialogueImages.img6.src = '6.png';
+dialogueImages.img7.src = '7.png';
+dialogueImages.img8.src = '8.png';
+
+// Add dialogue state
+const dialogue = {
+    active: true,
+    currentStep: 0,
+    text: '',
+    targetText: 'HAAALLLOOOOOO',
+    textProgress: 0,
+    bottomImage: {
+        y: canvas.height + 100,
+        targetY: canvas.height - 150
+    },
+    flowers: [],
+    skipButton: {
+        x: canvas.width - 150,
+        y: 30,
+        width: 100,
+        height: 40
+    }
+};
+
 // Game objects
 const ball = {
     x: canvas.width / 2,
@@ -90,6 +138,16 @@ sprites.right.hit[0].src = 'hit1.png';
 sprites.right.hit[1].src = 'hit2.png';
 sprites.right.hit[2].src = 'hit3.png';
 sprites.right.hit[3].src = 'hit4.png';
+
+// Add this near the top with other image loading
+const menuBackground = document.createElement('video');
+menuBackground.src = 'menubackground.mp4';
+menuBackground.loop = true;
+menuBackground.muted = true;
+menuBackground.play();
+
+const flowerSprite = new Image();
+flowerSprite.src = 'flowers.png';
 
 const players = {
     left: {
@@ -226,6 +284,12 @@ let prizeMessage = {
     color: "",
     alpha: 0,        // fully transparent by default
     duration: 0      // number of frames remaining before complete disappearance
+};
+
+// Add to the existing game state objects at the top
+const gameState = {
+    backgroundFlowers: [],
+    flowerSpawnTimer: 0
 };
 
 function movePlayer() {
@@ -586,29 +650,42 @@ function resetBall() {
     resetSound.play();
 }
 
+// Updated drawMenu function with animated background gif and smaller text
 function drawMenu() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Draw background video
+    if (menuBackground.readyState >= 2) { // Check if video is ready to play
+        ctx.drawImage(menuBackground, 0, 0, canvas.width, canvas.height);
+    }
+
     // Updated title with a Valentine's twist
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; // Semi-transparent background for text
+    ctx.fillRect(0, 70, canvas.width, 60);
+
     ctx.fillStyle = 'pink';
-    ctx.font = '48px Arial';
+    ctx.font = '24px "Press Start 2P"'; // Smaller text
     ctx.textAlign = 'center';
-    ctx.fillText("THE ULTIMATE TEST OF TEZAK", canvas.width / 2, 100);
+    ctx.fillText("THE ULTIMATE TEST OF TEZAK", canvas.width / 2, 110);
 
     // Define button size and positioning
-    const buttonWidth = 200;
+    const buttonWidth = 400; // Wider buttons
     const buttonHeight = 40;
     const buttonX = (canvas.width - buttonWidth) / 2;
     const startY = 200;
 
-    // Button 1: "Player vs Player" – using a hot pink background and a heart icon in the text
+    // Semi-transparent background for buttons
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(buttonX - 10, startY - 10, buttonWidth + 20, buttonHeight * 2 + 80);
+
+    // Button 1: "Player vs Player"
     ctx.fillStyle = '#FF69B4';
     ctx.fillRect(buttonX, startY, buttonWidth, buttonHeight);
     ctx.fillStyle = 'white';
-    ctx.font = '20px Arial';
+    ctx.font = '20px "Press Start 2P"';
     ctx.fillText('Player vs Player', canvas.width / 2, startY + 28);
 
-    // Button 2: "Player vs CPU" – similar styling with a different heart icon
+    // Button 2: "Player vs CPU"
     ctx.fillStyle = '#FF69B4';
     ctx.fillRect(buttonX, startY + 60, buttonWidth, buttonHeight);
     ctx.fillStyle = 'white';
@@ -754,12 +831,14 @@ function drawLoadingScreen() {
 }
 
 function draw() {
-    // Apply screen shake
     ctx.save();
     ctx.translate(screenShake.offsetX, screenShake.offsetY);
 
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw background flowers first
+    gameState.backgroundFlowers.forEach(flower => flower.draw(ctx));
 
     // Draw touch counters first (behind everything)
     ctx.font = '48px "Press Start 2P", monospace';
@@ -820,12 +899,231 @@ function draw() {
     ctx.restore();
 }
 
+// Modified dialogue drawing function
+function drawDialogue() {
+    if (!dialogue.active) return;
+
+    // Clear the entire canvas first
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw semi-transparent overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw dialogue box at the bottom
+    const dialogueBoxHeight = 150;
+    const dialogueBoxY = canvas.height - dialogueBoxHeight - 20; // 20px from bottom
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+    ctx.fillRect(50, dialogueBoxY, canvas.width - 100, dialogueBoxHeight);
+    ctx.strokeStyle = 'white';
+    ctx.strokeRect(50, dialogueBoxY, canvas.width - 100, dialogueBoxHeight);
+
+    // Draw current dialogue image based on step (positioned above dialogue box)
+    const currentImage = (() => {
+        switch (dialogue.currentStep) {
+            case 0: return dialogueImages.img8;
+            case 1: return dialogueImages.img7;
+            case 2: return dialogueImages.img2;
+            case 3: return dialogueImages.img6;
+            case 4: return dialogueImages.img3;
+            case 5: return dialogueImages.img1;
+            case 6: return dialogueImages.img5;
+            default: return dialogueImages.img3;
+        }
+    })();
+
+    // Draw the current image centered above dialogue box
+    if (currentImage && currentImage.complete) {
+        const imgWidth = 400;
+        const imgHeight = 300;
+        const imgY = dialogueBoxY - imgHeight - 2; // Position above dialogue box
+        ctx.drawImage(currentImage,
+            canvas.width / 2 - imgWidth / 2,
+            imgY,
+            imgWidth,
+            imgHeight
+        );
+    }
+
+    // Animate text with sound
+    if (dialogue.textProgress < dialogue.targetText.length) {
+        dialogue.textProgress += 0.2;
+        dialogue.text = dialogue.targetText.substring(0, Math.floor(dialogue.textProgress));
+
+        if (Math.floor(dialogue.textProgress) % 3 === 0) {
+            textBlipSound.currentTime = 0;
+            textBlipSound.play();
+        }
+    } else {
+        textBlipSound.pause();
+        textBlipSound.currentTime = 0;
+    }
+
+    // Draw text inside dialogue box
+    ctx.fillStyle = 'white';
+    ctx.font = '24px "Press Start 2P"';
+    ctx.textAlign = 'left';
+    const lineHeight = 30;
+    const maxWidth = canvas.width - 150;
+
+    // Word wrap the text
+    const words = dialogue.text.split(' ');
+    let line = '';
+    let y = dialogueBoxY + 40; // Start text 40px from top of dialogue box
+
+    words.forEach(word => {
+        const testLine = line + word + ' ';
+        if (ctx.measureText(testLine).width > maxWidth) {
+            ctx.fillText(line, 70, y);
+            line = word + ' ';
+            y += lineHeight;
+        } else {
+            line = testLine;
+        }
+    });
+    ctx.fillText(line, 70, y);
+
+    // Draw continue indicator at bottom of dialogue box
+    if (dialogue.textProgress >= dialogue.targetText.length) {
+        ctx.fillText('> Press SPACE to continue <', 70, dialogueBoxY + dialogueBoxHeight - 30);
+    }
+
+    // Update and draw flowers if showing final message
+    if (dialogue.currentStep === 6) {
+        if (Math.random() < 0.1) {
+            dialogue.flowers.push(new Flower());
+        }
+        dialogue.flowers = dialogue.flowers.filter(flower => flower.update());
+        dialogue.flowers.forEach(flower => flower.draw(ctx));
+    }
+
+    // Draw skip button in top right corner
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(dialogue.skipButton.x, dialogue.skipButton.y,
+        dialogue.skipButton.width, dialogue.skipButton.height);
+    ctx.strokeStyle = 'white';
+    ctx.strokeRect(dialogue.skipButton.x, dialogue.skipButton.y,
+        dialogue.skipButton.width, dialogue.skipButton.height);
+
+    // Draw skip text
+    ctx.fillStyle = 'white';
+    ctx.font = '20px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.fillText('SKIP',
+        dialogue.skipButton.x + dialogue.skipButton.width / 2,
+        dialogue.skipButton.y + dialogue.skipButton.height / 2 + 8);
+}
+
+// Updated Flower class with retro aesthetics and sprite support
+class Flower {
+    constructor(isBackground = false) {
+        this.x = Math.random() * canvas.width;
+        this.y = -20;
+        this.speedY = Math.random() * 1 + 0.5; // Slower for background
+        this.rotation = Math.random() * Math.PI * 2;
+        this.rotationSpeed = (Math.random() - 0.5) * 0.05;
+        this.size = Math.random() * 15 + 8; // Slightly smaller
+        this.isSprite = Math.random() > 0.5;
+        this.opacity = isBackground ? 0.15 : 1; // Lower opacity for background
+    }
+
+    update() {
+        this.y += this.speedY;
+        this.rotation += this.rotationSpeed;
+        return this.y < canvas.height;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = this.opacity;
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+
+        if (this.isSprite && flowerSprite.complete) {
+            // Draw flower sprite
+            ctx.drawImage(flowerSprite,
+                -this.size / 2, -this.size / 2,
+                this.size, this.size);
+        } else {
+            // Draw 8-bit pixel flower
+            ctx.fillStyle = '#FF69B4';
+
+            // Pixel flower pattern
+            const pixels = [
+                [-1, -2], [0, -2], [1, -2],
+                [-2, -1], [-1, -1], [0, -1], [1, -1], [2, -1],
+                [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0],
+                [-2, 1], [-1, 1], [0, 1], [1, 1], [2, 1],
+                [-1, 2], [0, 2], [1, 2]
+            ];
+
+            const pixelSize = this.size / 5;
+            pixels.forEach(([x, y]) => {
+                ctx.fillRect(
+                    x * pixelSize,
+                    y * pixelSize,
+                    pixelSize,
+                    pixelSize
+                );
+            });
+        }
+
+        ctx.restore();
+    }
+}
+
+// Add dialogue progression handler
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && dialogue.active && dialogue.textProgress >= dialogue.targetText.length) {
+        dialogue.currentStep++;
+        dialogue.textProgress = 0;
+        switch (dialogue.currentStep) {
+            case 1:
+                dialogue.targetText = "You might wonder what this could be...";
+                break;
+            case 2:
+                dialogue.targetText = "It's just a lil game...";
+                break;
+            case 3:
+                dialogue.targetText = "I'm sorry if I ever let you down...";
+                break;
+            case 4:
+                dialogue.targetText = "But I hope you like this! Put lots of effort into it!";
+                break;
+            case 5:
+                dialogue.targetText = "Anywaayyyyssssss...";
+                break;
+            case 6:
+                dialogue.targetText = "HAPPY VALENTINES DAY BABYYYY!!!";
+                explosionSound.play();
+                explosion.start();
+                break;
+            case 7:
+                dialogue.active = false;
+                currentGameState = GAME_STATES.MENU;
+                break;
+        }
+    }
+});
+
+// Modify the gameLoop function to include dialogue
 function gameLoop() {
-    if (currentGameState === GAME_STATES.MENU) {
+    // Start playing theme music when game starts
+    if (themeMusic.paused) {
+        themeMusic.play().catch(err => console.log("Audio playback failed:", err));
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (dialogue.active) {
+        drawDialogue();
+    } else if (currentGameState === GAME_STATES.MENU) {
         drawMenu();
     } else if (currentGameState === GAME_STATES.CHARACTER_SELECT) {
         drawCharacterSelect();
     } else if (currentGameState === GAME_STATES.PLAYING_PVP || currentGameState === GAME_STATES.PLAYING_CPU) {
+        updateBackgroundFlowers();
         movePlayer();
         if (currentGameState === GAME_STATES.PLAYING_CPU) {
             updateCPU();
@@ -937,6 +1235,18 @@ canvas.addEventListener('click', (e) => {
             currentGameState = GAME_STATES.PLAYING_CPU;
             resetGame();
         }
+    }
+
+    // Check if dialogue is active and click is on skip button
+    if (dialogue.active &&
+        clickX >= dialogue.skipButton.x &&
+        clickX <= dialogue.skipButton.x + dialogue.skipButton.width &&
+        clickY >= dialogue.skipButton.y &&
+        clickY <= dialogue.skipButton.y + dialogue.skipButton.height) {
+
+        // Skip to game menu
+        dialogue.active = false;
+        currentGameState = GAME_STATES.MENU;
     }
 });
 
@@ -1110,7 +1420,7 @@ function startSpinningWheelSpin() {
     spinningWheel.angle = 0;
     spinningWheel.angularVelocity = 1; // Set an initial angular velocity for smoother animation
     // Determine the outcome: 3.14% chance for "Mystery", else "Lose"
-    if (Math.random() < 0.0314) {
+    if (Math.random() < 0.5) {
         spinningWheel.prize = "Mystery";
     } else {
         spinningWheel.prize = "Lose";
@@ -1259,5 +1569,31 @@ function drawPrizeMessage() {
         ctx.restore();
     }
 }
+
+// Add new function to update background flowers
+function updateBackgroundFlowers() {
+    // Spawn new flowers
+    gameState.flowerSpawnTimer++;
+    if (gameState.flowerSpawnTimer > 60) { // Spawn every 60 frames
+        gameState.flowerSpawnTimer = 0;
+        if (gameState.backgroundFlowers.length < 40) { // Limit max flowers
+            gameState.backgroundFlowers.push(new Flower(true));
+        }
+    }
+
+    // Update existing flowers
+    gameState.backgroundFlowers = gameState.backgroundFlowers.filter(flower => {
+        flower.update();
+        return flower.y < canvas.height;
+    });
+}
+
+// Fix menu background by adding load event handler
+menuBackground.onload = () => {
+    console.log("Menu background loaded successfully");
+};
+menuBackground.onerror = (err) => {
+    console.error("Error loading menu background:", err);
+};
 
 gameLoop();
