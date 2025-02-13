@@ -1,6 +1,11 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
+// Create Audio objects for the hit and reset sounds
+const hitSound = new Audio('hit.mp3');
+const resetSound = new Audio('reset.mp3');
+const explosionSound = new Audio('bigexplosion.wav');
+
 // Game objects
 const ball = {
     x: canvas.width / 2,
@@ -123,7 +128,8 @@ const players = {
         animationTimer: 0,
         isHitting: false,
         hitTimer: 0,
-        gameWins: 0
+        gameWins: 0,
+        lastSpinScore: 0
     }
 };
 
@@ -141,6 +147,7 @@ const GROUND_Y = canvas.height - 50; // Ground level for players
 const GAME_STATES = {
     LOADING: 'loading',
     MENU: 'menu',
+    CHARACTER_SELECT: 'character_select',
     PLAYING_PVP: 'playing_pvp',
     PLAYING_CPU: 'playing_cpu'
 };
@@ -189,72 +196,90 @@ setTimeout(() => {
     }
 }, 5000); // 5 second timeout
 
-function updateCPU() {
-    const cpu = players.right;
+// Global variable to hold the selected character side in CPU mode
+// It can be either 'left' (human is left and CPU is right) 
+// or 'right' (human is right and CPU is left)
+let selectedCharacter = 'left';
 
-    if (currentGameState !== GAME_STATES.PLAYING_CPU) {
-        return;
-    }
+// Global variables to manage the love letter pause.
+let lovePause = {
+    active: false,
+    timer: 0,
+    message: ""
+};
 
-    if (ball.x < canvas.width / 2) {
-        // Ball is on player's side - move randomly
-        if (Math.random() < 0.02) { // 2% chance to change direction each frame
-            cpu.speedX = (Math.random() - 0.5) * MOVE_SPEED * 2; // Random direction
-        }
+// Decide randomly (in frames) when the next love pause should occur.
+let nextLovePause = Math.floor(Math.random() * 1200) + 600;
 
-        // Keep CPU within reasonable bounds on their side
-        if (cpu.x < canvas.width / 2 + 50) {
-            cpu.speedX = MOVE_SPEED; // Move right if too close to net
-        } else if (cpu.x > canvas.width - cpu.width - 50) {
-            cpu.speedX = -MOVE_SPEED; // Move left if too close to wall
-        }
+// Global variable for the spinning wheel pause.
+let spinningWheel = {
+    active: false,
+    timer: 0,
+    angle: 0,
+    prize: "",
+    ready: false,
+    angularVelocity: 0 // New property to control fluid rotation
+};
 
-        return;
-    }
-
-    // Original CPU logic when ball is on their side
-    const ballFutureX = ball.x + ball.speedX * 3;
-    const ballFutureY = ball.y + ball.speedY * 3;
-
-    // Move towards the ball
-    if (ballFutureX < cpu.x + cpu.width / 2 - 10) {
-        cpu.speedX = -MOVE_SPEED;
-    } else if (ballFutureX > cpu.x + cpu.width / 2 + 10) {
-        cpu.speedX = MOVE_SPEED;
-    } else {
-        cpu.speedX = 0;
-    }
-
-    // Jump logic
-    const shouldJump = !cpu.isJumping &&
-        ball.y < canvas.height - 150 && // Ball is high enough
-        Math.abs(ball.x - cpu.x) < 150; // Ball is close enough horizontally
-
-    if (shouldJump) {
-        cpu.speedY = JUMP_FORCE;
-        cpu.isJumping = true;
-    }
-}
+let prizeMessage = {
+    text: "",
+    color: "",
+    alpha: 0,        // fully transparent by default
+    duration: 0      // number of frames remaining before complete disappearance
+};
 
 function movePlayer() {
-    // Left player controls (A, D, W)
-    if (keys['a']) {
-        players.left.speedX = -MOVE_SPEED;
-    } else if (keys['d']) {
-        players.left.speedX = MOVE_SPEED;
-    } else {
-        players.left.speedX = 0;
-    }
-
-    if (keys['w'] && !players.left.isJumping) {
-        players.left.speedY = JUMP_FORCE;
-        players.left.isJumping = true;
-        players.left.isSpike1 = true;
-        players.left.isSpike2 = false;
-    }
-
-    // Right player controls (only in PVP mode)
-    if (currentGameState === GAME_STATES.PLAYING_PVP) {
+    if (currentGameState === GAME_STATES.PLAYING_CPU) {
+        // If human is playing as "left"
+        if (selectedCharacter === 'left') {
+            // Human controls left player using A, D, W
+            if (keys['a']) {
+                players.left.speedX = -MOVE_SPEED;
+            } else if (keys['d']) {
+                players.left.speedX = MOVE_SPEED;
+            } else {
+                players.left.speedX = 0;
+            }
+            if (keys['w'] && !players.left.isJumping) {
+                players.left.speedY = JUMP_FORCE;
+                players.left.isJumping = true;
+                players.left.isSpike1 = true;
+                players.left.isSpike2 = false;
+            }
+        }
+        // If human is playing as "right"
+        else if (selectedCharacter === 'right') {
+            // Human controls right player using arrow keys
+            if (keys['ArrowLeft']) {
+                players.right.speedX = -MOVE_SPEED;
+            } else if (keys['ArrowRight']) {
+                players.right.speedX = MOVE_SPEED;
+            } else {
+                players.right.speedX = 0;
+            }
+            if (keys['ArrowUp'] && !players.right.isJumping) {
+                players.right.speedY = JUMP_FORCE;
+                players.right.isJumping = true;
+                players.right.isSpike1 = true;
+                players.right.isSpike2 = false;
+            }
+        }
+    } else if (currentGameState === GAME_STATES.PLAYING_PVP) {
+        // Left player controls (A, D, W)
+        if (keys['a']) {
+            players.left.speedX = -MOVE_SPEED;
+        } else if (keys['d']) {
+            players.left.speedX = MOVE_SPEED;
+        } else {
+            players.left.speedX = 0;
+        }
+        if (keys['w'] && !players.left.isJumping) {
+            players.left.speedY = JUMP_FORCE;
+            players.left.isJumping = true;
+            players.left.isSpike1 = true;
+            players.left.isSpike2 = false;
+        }
+        // Right player controls (Arrow keys)
         if (keys['ArrowLeft']) {
             players.right.speedX = -MOVE_SPEED;
         } else if (keys['ArrowRight']) {
@@ -262,7 +287,6 @@ function movePlayer() {
         } else {
             players.right.speedX = 0;
         }
-
         if (keys['ArrowUp'] && !players.right.isJumping) {
             players.right.speedY = JUMP_FORCE;
             players.right.isJumping = true;
@@ -273,14 +297,10 @@ function movePlayer() {
 
     // Apply physics to both players
     [players.left, players.right].forEach(player => {
-        // Apply gravity
         player.speedY += GRAVITY;
-
-        // Update position
         player.x += player.speedX;
         player.y += player.speedY;
 
-        // Ground collision
         if (player.y > GROUND_Y) {
             player.y = GROUND_Y;
             player.speedY = 0;
@@ -289,33 +309,85 @@ function movePlayer() {
             player.isSpike2 = false;
         }
 
-        // Left and right boundaries
-        if (player.x < 0) {
-            player.x = 0;
-        }
-        if (player.x > canvas.width - player.width) {
+        // Boundary checks
+        if (player.x < 0) player.x = 0;
+        if (player.x > canvas.width - player.width)
             player.x = canvas.width - player.width;
-        }
 
         // Net collision
-        if (player === players.left && player.x + player.width > net.x - net.width / 2) {
+        if (player === players.left && player.x + player.width > net.x - net.width / 2)
             player.x = net.x - net.width / 2 - player.width;
-        }
-        if (player === players.right && player.x < net.x + net.width / 2) {
+        if (player === players.right && player.x < net.x + net.width / 2)
             player.x = net.x + net.width / 2;
-        }
     });
 
-    // Update animations
+    // Update animations for each player
     updatePlayerAnimation(players.left);
     updatePlayerAnimation(players.right);
+}
+
+function updateCPU() {
+    if (currentGameState !== GAME_STATES.PLAYING_CPU) return;
+
+    let cpu, human;
+    // Setup based on the human's selection
+    if (selectedCharacter === 'left') {
+        // Human controls left, so CPU controls right.
+        human = players.left;
+        cpu = players.right;
+    } else { // selectedCharacter === 'right'
+        // Human controls right, so CPU controls left.
+        human = players.right;
+        cpu = players.left;
+    }
+
+    let cpuCenter = cpu.x + cpu.width / 2;
+
+    if (selectedCharacter === 'left') {
+        // Human is left—CPU is on the right side.
+        if (ball.x > canvas.width / 2) {
+            // When the ball is on the CPU's side, move directly toward the ball.
+            const ballFutureX = ball.x + ball.speedX * 3;
+            if (ballFutureX < cpuCenter - 10)
+                cpu.speedX = -MOVE_SPEED;
+            else if (ballFutureX > cpuCenter + 10)
+                cpu.speedX = MOVE_SPEED;
+            else
+                cpu.speedX = 0;
+        } else {
+            // When the ball is on the human's side, do random movement.
+            if (Math.random() < 0.02)
+                cpu.speedX = (Math.random() - 0.5) * MOVE_SPEED * 2;
+        }
+    } else {
+        // selectedCharacter === 'right'
+        // Human is right, so CPU (players.left) is on the left side.
+        if (ball.x < canvas.width / 2) {
+            // When the ball is on its side, move toward it.
+            const ballFutureX = ball.x + ball.speedX * 3;
+            if (ballFutureX < cpuCenter - 10)
+                cpu.speedX = -MOVE_SPEED;
+            else if (ballFutureX > cpuCenter + 10)
+                cpu.speedX = MOVE_SPEED;
+            else
+                cpu.speedX = 0;
+        } else {
+            // When the ball is on the human's side, do random movement.
+            if (Math.random() < 0.02)
+                cpu.speedX = (Math.random() - 0.5) * MOVE_SPEED * 2;
+        }
+    }
+
+    // CPU jump (same for both sides)
+    if (!cpu.isJumping && ball.y < canvas.height - 150 && Math.abs(ball.x - cpu.x) < 150) {
+        cpu.speedY = JUMP_FORCE;
+        cpu.isJumping = true;
+    }
 }
 
 function updateBall() {
     // Apply gravity
     ball.speedY += ball.gravity;
-
-    // Apply movement
     ball.x += ball.speedX;
     ball.y += ball.speedY;
 
@@ -323,7 +395,7 @@ function updateBall() {
     ball.speedX *= ball.friction;
     ball.speedY *= ball.friction;
 
-    // Bounce off walls
+    // Bounce off right wall
     if (ball.x + ball.radius > canvas.width) {
         ball.x = canvas.width - ball.radius;
         ball.speedX *= -ball.bounce;
@@ -331,10 +403,19 @@ function updateBall() {
         checkGameWin();
         resetBall();
     }
+
+    // Bounce off left wall
     if (ball.x - ball.radius < 0) {
         ball.x = ball.radius;
         ball.speedX *= -ball.bounce;
         players.right.score++;
+
+        // Every 5 points for player 2 triggers the prize wheel
+        if (players.right.score % 5 === 0 && players.right.score !== players.right.lastSpinScore) {
+            players.right.lastSpinScore = players.right.score;
+            triggerSpinningWheel();
+        }
+
         checkGameWin();
         resetBall();
     }
@@ -380,6 +461,9 @@ function updateBall() {
             ball.y + ball.radius > player.y &&
             ball.y - ball.radius < player.y + player.height) {
 
+            // Play hit sound
+            hitSound.play();
+
             // Reset opponent's touches when this player hits the ball
             if (player === players.left) {
                 players.right.touches = 0;
@@ -421,6 +505,13 @@ function updateBall() {
             } else {
                 ball.speedY = -12;
                 ball.rotationSpeed = newSpeed * 0.02;
+            }
+
+            // Increase power for the second touch
+            if (player.touches === 2) {
+                newSpeed *= 1.5; // Increase speed by 50%
+                ball.speedY *= 1.5; // Increase vertical speed
+                ball.rotationSpeed *= 1.5; // Increase rotation speed
             }
 
             // Direction depends on which player hit the ball
@@ -471,6 +562,16 @@ function updateBall() {
 
     // Update rotation
     ball.rotation += ball.rotationSpeed;
+
+    if (spinningWheel.active) {
+        spinningWheel.timer--;
+        spinningWheel.angle += spinningWheel.angularVelocity;
+        spinningWheel.angularVelocity *= 0.98; // Gradually decelerate for a fluid effect
+        if (spinningWheel.timer <= 0) {
+            applySpinningWheelPrize();
+            spinningWheel.active = false;
+        }
+    }
 }
 
 function resetBall() {
@@ -481,38 +582,77 @@ function resetBall() {
     // Reset touches for both players
     players.left.touches = 0;
     players.right.touches = 0;
+    // Play reset sound
+    resetSound.play();
 }
 
 function drawMenu() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Title
-    ctx.fillStyle = 'black';
+    // Updated title with a Valentine's twist
+    ctx.fillStyle = 'pink';
     ctx.font = '48px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('Volleyball Game', canvas.width / 2, 100);
+    ctx.fillText("THE ULTIMATE TEST OF TEZAK", canvas.width / 2, 100);
 
-    // Menu options
-    ctx.font = '24px Arial';
+    // Define button size and positioning
+    const buttonWidth = 200;
+    const buttonHeight = 40;
+    const buttonX = (canvas.width - buttonWidth) / 2;
+    const startY = 200;
 
-    // Draw buttons
-    const buttons = [
-        { text: 'Player vs Player', y: 200 },
-        { text: 'Player vs CPU', y: 250 }
-    ];
+    // Button 1: "Player vs Player" – using a hot pink background and a heart icon in the text
+    ctx.fillStyle = '#FF69B4';
+    ctx.fillRect(buttonX, startY, buttonWidth, buttonHeight);
+    ctx.fillStyle = 'white';
+    ctx.font = '20px Arial';
+    ctx.fillText('Player vs Player', canvas.width / 2, startY + 28);
 
-    buttons.forEach(button => {
+    // Button 2: "Player vs CPU" – similar styling with a different heart icon
+    ctx.fillStyle = '#FF69B4';
+    ctx.fillRect(buttonX, startY + 60, buttonWidth, buttonHeight);
+    ctx.fillStyle = 'white';
+    ctx.fillText('Player vs CPU', canvas.width / 2, startY + 60 + 28);
+}
+
+function drawCharacterSelect() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Title
+    ctx.fillStyle = 'black';
+    ctx.font = '36px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Select Your Character', canvas.width / 2, 80);
+
+    // Left Character Option (using left.spike[1] which is spike-2.png)
+    const leftX = canvas.width / 4 - 40;
+    const leftY = 150;
+    if (sprites.left.spike[1] && sprites.left.spike[1].complete) {
+        ctx.drawImage(sprites.left.spike[1], leftX, leftY, 80, 120);
+    } else {
         ctx.fillStyle = 'blue';
-        const buttonWidth = 200;
-        const buttonHeight = 40;
-        const buttonX = canvas.width / 2 - buttonWidth / 2;
-        const buttonY = button.y - 30;
+        ctx.fillRect(leftX, leftY, 80, 120);
+    }
+    ctx.fillStyle = 'black';
+    ctx.font = '24px Arial';
+    ctx.fillText('Player 1', canvas.width / 4, leftY + 140);
 
-        ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-
-        ctx.fillStyle = 'white';
-        ctx.fillText(button.text, canvas.width / 2, button.y);
-    });
+    // Right Character Option (using right.spike[1] which is spike2.png)
+    const rightWidth = 90;
+    const rightX = canvas.width * 3 / 4 - rightWidth / 2;
+    const rightY = 150;
+    if (sprites.right.spike[1] && sprites.right.spike[1].complete) {
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(sprites.right.spike[1], -(canvas.width * 3 / 4 + rightWidth / 2), rightY, rightWidth, 120);
+        ctx.restore();
+    } else {
+        ctx.fillStyle = 'red';
+        ctx.fillRect(rightX, rightY, rightWidth, 120);
+    }
+    ctx.fillStyle = 'black';
+    ctx.font = '24px Arial';
+    ctx.fillText('Player 2', canvas.width * 3 / 4, rightY + 140);
 }
 
 function drawPixelHeart(x, y, rotation) {
@@ -681,41 +821,119 @@ function draw() {
 }
 
 function gameLoop() {
-    switch (currentGameState) {
-        case GAME_STATES.LOADING:
-            drawLoadingScreen();
-            break;
-        case GAME_STATES.MENU:
-            drawMenu();
-            break;
-        case GAME_STATES.PLAYING_PVP:
-        case GAME_STATES.PLAYING_CPU:
-            movePlayer();
-            if (currentGameState === GAME_STATES.PLAYING_CPU) {
-                updateCPU();
+    if (currentGameState === GAME_STATES.MENU) {
+        drawMenu();
+    } else if (currentGameState === GAME_STATES.CHARACTER_SELECT) {
+        drawCharacterSelect();
+    } else if (currentGameState === GAME_STATES.PLAYING_PVP || currentGameState === GAME_STATES.PLAYING_CPU) {
+        movePlayer();
+        if (currentGameState === GAME_STATES.PLAYING_CPU) {
+            updateCPU();
+        }
+        updateBall();
+        updateScreenShake();
+        explosion.update();
+
+        // Love pause update...
+        if (lovePause.active) {
+            lovePause.timer--;
+            if (lovePause.timer <= 0) {
+                lovePause.active = false;
+                nextLovePause = Math.floor(Math.random() * 1200) + 600;
             }
-            updateBall();
-            updateScreenShake();
-            explosion.update();
-            draw();
-            break;
+        } else {
+            nextLovePause--;
+            if (nextLovePause <= 0) {
+                startLovePause();
+            }
+        }
+
+        // Update spinning wheel if active...
+        if (spinningWheel.active) {
+            spinningWheel.timer--;
+            spinningWheel.angle += spinningWheel.angularVelocity;
+            if (spinningWheel.timer <= 0) {
+                applySpinningWheelPrize();
+                spinningWheel.active = false;
+            }
+        }
+
+        draw();
+
+        if (lovePause.active) {
+            drawLoveMessageWatermark();
+        }
+        drawPrizeWheelUI();
+
+        // Update and draw the prize message overlay with fade effect
+        updatePrizeMessage();
+        drawPrizeMessage();
     }
     requestAnimationFrame(gameLoop);
 }
 
+// ----- CLICK HANDLER -----
+// This click handler covers both the MENU and CHARACTER_SELECT states.
+// No swapping of player objects now occurs—instead, selectedCharacter is used later
 canvas.addEventListener('click', (e) => {
-    if (currentGameState === GAME_STATES.MENU) {
-        const rect = canvas.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const clickY = e.clientY - rect.top;
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
 
-        // Check PvP button
-        if (clickX >= 300 && clickX <= 500 && clickY >= 170 && clickY <= 210) {
+    // Define the prize wheel area (an 80×80 square with a 10px margin)
+    const margin = 10;
+    const wheelRadius = 40;
+    const boxX = canvas.width - margin - 2 * wheelRadius;
+    const boxY = margin;
+    const boxSize = 2 * wheelRadius;
+
+    if ((currentGameState === GAME_STATES.PLAYING_PVP || currentGameState === GAME_STATES.PLAYING_CPU) &&
+        clickX >= boxX && clickX <= boxX + boxSize &&
+        clickY >= boxY && clickY <= boxY + boxSize) {
+        if (spinningWheel.ready) {
+            startSpinningWheelSpin();
+        }
+        return; // Prevent further click processing.
+    }
+
+    if (currentGameState === GAME_STATES.MENU) {
+        const buttonWidth = 200;
+        const buttonHeight = 40;
+        const buttonX = (canvas.width - buttonWidth) / 2;
+        const startY = 200;
+
+        // "Player vs Player" button
+        if (clickX >= buttonX && clickX <= buttonX + buttonWidth &&
+            clickY >= startY && clickY <= startY + buttonHeight) {
             currentGameState = GAME_STATES.PLAYING_PVP;
             resetGame();
         }
-        // Check PvCPU button
-        else if (clickX >= 300 && clickX <= 500 && clickY >= 220 && clickY <= 260) {
+        // "Player vs CPU" button
+        else if (clickX >= buttonX && clickX <= buttonX + buttonWidth &&
+            clickY >= startY + 60 && clickY <= startY + 60 + buttonHeight) {
+            currentGameState = GAME_STATES.CHARACTER_SELECT;
+        }
+
+    } else if (currentGameState === GAME_STATES.CHARACTER_SELECT) {
+        // Define character selection hit areas
+        const leftAreaX = canvas.width / 4 - 40;
+        const leftAreaY = 150;
+        const leftAreaWidth = 80;
+        const leftAreaHeight = 120;
+
+        const rightAreaX = canvas.width * 3 / 4 - 40;
+        const rightAreaY = 150;
+        const rightAreaWidth = 80;
+        const rightAreaHeight = 120;
+
+        if (clickX >= leftAreaX && clickX <= leftAreaX + leftAreaWidth &&
+            clickY >= leftAreaY && clickY <= leftAreaY + leftAreaHeight) {
+            selectedCharacter = 'left';
+            currentGameState = GAME_STATES.PLAYING_CPU;
+            resetGame();
+        } else if (clickX >= rightAreaX && clickX <= rightAreaX + rightAreaWidth &&
+            clickY >= rightAreaY && clickY <= rightAreaY + rightAreaHeight) {
+            selectedCharacter = 'right';
             currentGameState = GAME_STATES.PLAYING_CPU;
             resetGame();
         }
@@ -830,22 +1048,23 @@ class ExplosionEffect {
         this.scale = 1;
         this.opacity = 1;
 
-        // Push players to walls
+        // Play the explosion sound
+        explosionSound.play();
+
+        // Push players to walls – dramatic love burst!
         players.left.x = 0;
         players.right.x = canvas.width - players.right.width;
 
-        // Add extreme screen shake
+        // Add an intense screen shake for extra impact
         screenShake.intensity = 30;
         screenShake.duration = 30;
     }
 
     update() {
         if (!this.active) return;
-
         this.currentFrame++;
         this.scale += 0.1;
         this.opacity = 1 - (this.currentFrame / this.duration);
-
         if (this.currentFrame >= this.duration) {
             this.active = false;
         }
@@ -853,26 +1072,192 @@ class ExplosionEffect {
 
     draw(ctx) {
         if (!this.active) return;
-
         ctx.save();
         ctx.globalAlpha = this.opacity;
 
-        // Draw explosion circle
-        ctx.fillStyle = 'orange';
+        // Use a hot pink color for the explosion circle
+        ctx.fillStyle = '#FF69B4';
         ctx.beginPath();
         ctx.arc(canvas.width / 2, canvas.height / 2, 100 * this.scale, 0, Math.PI * 2);
         ctx.fill();
 
-        // Draw text
+        // Draw a Valentine's themed message near the explosion center
         ctx.font = '48px "Press Start 2P"';
         ctx.fillStyle = 'white';
         ctx.textAlign = 'center';
         ctx.fillText('BOMBAAACLATTTT', canvas.width / 2, canvas.height / 2);
-
         ctx.restore();
     }
 }
 
 const explosion = new ExplosionEffect();
 
-gameLoop(); 
+// ===== NEW FUNCTIONS FOR THE SPINNING WHEEL =====
+// When triggered from the score event, make the prize wheel visible and ready.
+function triggerSpinningWheel() {
+    spinningWheel.ready = true;
+    spinningWheel.active = false; // not spinning yet
+    spinningWheel.angle = 0;
+    spinningWheel.timer = 0;
+    spinningWheel.prize = "";
+}
+
+// Called when the player clicks on the prize wheel area.
+function startSpinningWheelSpin() {
+    spinningWheel.ready = false;
+    spinningWheel.active = true;
+    spinningWheel.timer = 180; // Approximately 3 seconds for the spin animation
+    spinningWheel.angle = 0;
+    spinningWheel.angularVelocity = 1; // Set an initial angular velocity for smoother animation
+    // Determine the outcome: 3.14% chance for "Mystery", else "Lose"
+    if (Math.random() < 0.0314) {
+        spinningWheel.prize = "Mystery";
+    } else {
+        spinningWheel.prize = "Lose";
+    }
+}
+
+function applySpinningWheelPrize() {
+    console.log("Prize Wheel Outcome: " + spinningWheel.prize);
+    if (spinningWheel.prize === "Mystery") {
+        prizeMessage.text = "YOU WON!";
+        prizeMessage.color = '#00FF00';
+    } else {
+        prizeMessage.text = "TRY AGAIN LATER";
+        prizeMessage.color = '#FF0000';
+    }
+    prizeMessage.alpha = 1;  // fully visible
+    prizeMessage.duration = 240; // keep the message for 180 frames (~3 seconds) then fade over the last 60 frames
+}
+
+// ===== NEW FUNCTIONS FOR THE LOVE PAUSE =====
+function startLovePause() {
+    lovePause.active = true;
+    lovePause.timer = 180; // Pause for 180 frames (~3 seconds)
+    const messages = [
+        "Dear SooSoo, you make my heart skip a beat!",
+        "Roses are red, violets are blue, my love blossoms when I see you!",
+        "You are the spark that ignites my passion.",
+        "Every moment with you is a beautiful dream.",
+        "You are the reason behind my smiles!",
+        "I love you more than words can say!",
+        "You are the sunshine of my life!",
+        "I cherish every moment we spend together!",
+        "You make my heart skip a beat every time I see you!",
+        "I'm so lucky to have you in my life!",
+        "You are the apple of my eye!",
+        "I'm so happy to be with you!",
+        "You are the best thing that ever happened to me!",
+        "I'm so grateful for our friendship!",
+        "You are the light of my life!",
+        "I'm so thankful for your love!",
+        "You are the joy of my life!"
+    ];
+    lovePause.message = messages[Math.floor(Math.random() * messages.length)];
+}
+
+// ===== NEW OVERLAY DRAW FUNCTIONS =====
+function drawLoveMessageWatermark() {
+    ctx.save();
+    ctx.font = '24px "Press Start 2P"';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255, 105, 180, 0.3)';
+    ctx.fillText(lovePause.message, canvas.width / 2, canvas.height / 2);
+    ctx.restore();
+}
+
+function drawPrizeWheelUI() {
+    // Only draw if the wheel is displayed (ready or actively spinning)
+    if (!spinningWheel.ready && !spinningWheel.active) return;
+    ctx.save();
+    const margin = 10;
+    const wheelRadius = 50; // Increase the prize wheel size
+    const wheelCenterX = canvas.width - margin - wheelRadius;
+    const wheelCenterY = margin + wheelRadius;
+    ctx.translate(wheelCenterX, wheelCenterY);
+
+    // Use the current spinning angle if active; otherwise—a ready wheel remains static.
+    const currentAngle = spinningWheel.active ? spinningWheel.angle : 0;
+    ctx.rotate(currentAngle);
+
+    // Draw Mystery segment (tiny wedge)
+    const mysteryAngle = 2 * Math.PI * 0.0314; // ~0.197 radians (~11.3°)
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, wheelRadius, 0, mysteryAngle, false);
+    ctx.closePath();
+    ctx.fillStyle = "#FF1493";
+    ctx.fill();
+
+    // Draw Lose segment (the rest of the circle)
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, wheelRadius, mysteryAngle, 2 * Math.PI, false);
+    ctx.closePath();
+    ctx.fillStyle = "#FFC0CB";
+    ctx.fill();
+
+    // Draw the outer outline.
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, wheelRadius, 0, 2 * Math.PI);
+    ctx.stroke();
+
+    // Draw a divider line between segments.
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(wheelRadius * Math.cos(mysteryAngle), wheelRadius * Math.sin(mysteryAngle));
+    ctx.stroke();
+
+    // Draw text labels for each segment.
+    ctx.fillStyle = "white";
+    ctx.font = "8px 'Press Start 2P'";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    // "MYSTERY" label placed approximately in the middle of its wedge.
+    const midAngleMyst = mysteryAngle / 2;
+    const textX = (wheelRadius / 2) * Math.cos(midAngleMyst);
+    const textY = (wheelRadius / 2) * Math.sin(midAngleMyst);
+    ctx.fillText("MYSTERY", textX, textY);
+
+    // "LOSE" label placed in the middle of the lose segment.
+    const midAngleLose = mysteryAngle + (2 * Math.PI - mysteryAngle) / 2;
+    const textX2 = (wheelRadius / 2) * Math.cos(midAngleLose);
+    const textY2 = (wheelRadius / 2) * Math.sin(midAngleLose);
+    ctx.fillText("LOSE", textX2, textY2);
+
+    ctx.restore();
+}
+
+function updatePrizeMessage() {
+    if (prizeMessage.text !== "") {
+        // Decrease the duration each frame
+        if (prizeMessage.duration > 0) {
+            prizeMessage.duration--;
+            // If in the fading-out phase (say the last 60 frames), update alpha
+            if (prizeMessage.duration < 60) {
+                prizeMessage.alpha = prizeMessage.duration / 60;
+            }
+        } else {
+            // Once complete, reset the prize message
+            prizeMessage.text = "";
+            prizeMessage.alpha = 0;
+        }
+    }
+}
+
+function drawPrizeMessage() {
+    if (prizeMessage.text !== "") {
+        ctx.save();
+        ctx.globalAlpha = prizeMessage.alpha;
+        ctx.font = '52px "Press Start 2P"';
+        ctx.fillStyle = prizeMessage.color;
+        ctx.textAlign = 'center';
+        ctx.fillText(prizeMessage.text, canvas.width / 2, canvas.height / 2);
+        ctx.restore();
+    }
+}
+
+gameLoop();
